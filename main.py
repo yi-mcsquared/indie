@@ -245,7 +245,7 @@ def main():
     header_cols = st.columns(len(CITIES_BY_CONTINENT))
     for i, (continent, _) in enumerate(CITIES_BY_CONTINENT.items()):
         with header_cols[i]:
-            st.markdown(f"<h4 style='text-align: center; margin-bottom: 0.5rem; color: #8A2BE2;'>{continent}</h4>", unsafe_allow_html=True)
+            st.markdown(f"<div style='text-align: center;'><h4 style='color: #8A2BE2; margin: 0; padding: 0.25rem;'>{continent}</h4></div>", unsafe_allow_html=True)
     
     # Create columns for city buttons
     city_cols = st.columns(len(CITIES_BY_CONTINENT))
@@ -276,7 +276,7 @@ def main():
     header_cols = st.columns(len(CITIES_BY_CONTINENT))
     for i, (continent, _) in enumerate(CITIES_BY_CONTINENT.items()):
         with header_cols[i]:
-            st.markdown(f"<h4 style='text-align: center; margin-bottom: 0.5rem; color: #8A2BE2;'>{continent}</h4>", unsafe_allow_html=True)
+            st.markdown(f"<div style='text-align: center;'><h4 style='color: #8A2BE2; margin: 0; padding: 0.25rem;'>{continent}</h4></div>", unsafe_allow_html=True)
     
     # Create columns for city buttons
     city_cols = st.columns(len(CITIES_BY_CONTINENT))

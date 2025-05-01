@@ -2,8 +2,6 @@ import datetime
 import pytz
 from typing import List, Dict
 import streamlit as st
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 import time
 import plotly.graph_objects as go
 import plotly.express as px

@@ -189,11 +189,64 @@ def create_timeline_visualization(times: Dict[str, datetime.datetime], selected_
     return fig
 
 def validate_time_input(time_str: str) -> bool:
-    """Validate time input in HH:MM format"""
-    pattern = r'^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$'
-    return bool(re.match(pattern, time_str))
+    """Validate time input in various formats (HH:MM, HHMM, HMM, HH)"""
+    # Remove any non-digit characters
+    digits = ''.join(filter(str.isdigit, time_str))
+    
+    # Handle different formats
+    if len(digits) == 4:  # HHMM format
+        hours = int(digits[:2])
+        minutes = int(digits[2:])
+    elif len(digits) == 3:  # HMM format
+        hours = int(digits[0])
+        minutes = int(digits[1:])
+    elif len(digits) == 2:  # HH format
+        hours = int(digits)
+        minutes = 0
+    else:
+        return False
+    
+    return 0 <= hours <= 23 and 0 <= minutes <= 59
+
+def parse_time_input(time_str: str) -> tuple[int, int]:
+    """Parse time input in various formats into hours and minutes"""
+    # Remove any non-digit characters
+    digits = ''.join(filter(str.isdigit, time_str))
+    
+    if len(digits) == 4:  # HHMM format
+        return int(digits[:2]), int(digits[2:])
+    elif len(digits) == 3:  # HMM format
+        return int(digits[0]), int(digits[1:])
+    elif len(digits) == 2:  # HH format
+        return int(digits), 0
+    else:
+        raise ValueError("Invalid time format")
+
+def get_time_period_emoji(period: str) -> str:
+    """Get emoji for time period"""
+    emoji_map = {
+        "Morning": "🌅",
+        "Afternoon": "☀️",
+        "Evening": "🌆",
+        "Night": "🌙"
+    }
+    return emoji_map.get(period, "")
 
 def main():
+    # Add custom CSS for button colors
+    st.markdown("""
+    <style>
+        div[data-testid="stButton"] > button[kind="primary"] {
+            background-color: #8A2BE2;
+            border-color: #8A2BE2;
+        }
+        div[data-testid="stButton"] > button[kind="primary"]:hover {
+            background-color: #7B1FA2;
+            border-color: #7B1FA2;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
     # Add Kuromi ASCII art and theme header
     st.markdown("""
     <div style='text-align: center; margin-bottom: 0.5rem;'>
@@ -309,31 +362,32 @@ def main():
     if st.session_state.comparison_cities:
         st.markdown("""
         <div style='background-color: #E6E6FA; padding: 0.5rem; border-radius: 10px; margin-bottom: 1rem;'>
-            <h3 style='color: #8A2BE2; margin: 0; padding: 0.25rem;'>3. Select Time</h3>
+            <h3 style='color: #8A2BE2; margin: 0; padding: 0.25rem;'>3. Enter Desired Time in Primary Time Zone</h3>
         </div>
         """, unsafe_allow_html=True)
         
         current_time = datetime.datetime.now(st.session_state.coordinator.local_timezone)
         
-        # Time input
+        # Time input with flexible format
         time_input = st.text_input(
-            "Enter time in 24hr format (e.g., 14:30)",
-            value=current_time.strftime("%H:%M")
+            "Enter time (e.g., 14:30, 1430, 230, or 14)",
+            value=current_time.strftime("%H:%M"),
+            help="You can enter time in various formats: HH:MM (14:30), HHMM (1430), HMM (230), or HH (14)"
         )
         
         if time_input:
             if validate_time_input(time_input):
                 try:
-                    hour, minute = map(int, time_input.split(':'))
+                    hour, minute = parse_time_input(time_input)
                     selected_time = datetime.datetime.combine(
                         current_time.date(),
                         datetime.time(hour, minute)
                     )
                     st.session_state.selected_time = selected_time
                 except ValueError:
-                    st.error("Please enter a valid time in HH:MM format")
+                    st.error("Please enter a valid time")
             else:
-                st.error("Please enter time in HH:MM format (24-hour)")
+                st.error("Please enter time in a valid format (HH:MM, HHMM, HMM, or HH)")
         
         # Only show Step 4 if time is selected and valid
         if st.session_state.selected_time:
@@ -348,11 +402,11 @@ def main():
                 fig = create_timeline_visualization(times, st.session_state.selected_time, st.session_state.coordinator)
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # Display time details
-                st.markdown("<h4 style='color: #8A2BE2;'>Time Details</h4>", unsafe_allow_html=True)
+                # Display time details without header
                 for city, time in times.items():
                     period = st.session_state.coordinator.get_time_period(time)
-                    st.markdown(f"<p style='color: #8A2BE2;'><strong>{city}</strong>: {time.strftime('%H:%M')} ({period})</p>", unsafe_allow_html=True)
+                    emoji = get_time_period_emoji(period)
+                    st.markdown(f"<p style='color: #8A2BE2;'><strong>{city}</strong>: {time.strftime('%H:%M')} {emoji} ({period})</p>", unsafe_allow_html=True)
     else:
         st.info("Please select at least one comparison city to continue")
 

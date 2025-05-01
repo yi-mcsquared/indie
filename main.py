@@ -5,6 +5,9 @@ import streamlit as st
 import time
 import plotly.graph_objects as go
 import plotly.express as px
+import pandas as pd
+import numpy as np
+import re
 
 # Common city to timezone mappings
 CITY_TO_TIMEZONE = {
@@ -20,53 +23,76 @@ CITY_TO_TIMEZONE = {
     'berlin': 'Europe/Berlin',
     'rome': 'Europe/Rome',
     'amsterdam': 'Europe/Amsterdam',
-    # Asia
+    # Asia & Australia
     'tokyo': 'Asia/Tokyo',
     'singapore': 'Asia/Singapore',
     'hong kong': 'Asia/Hong_Kong',
     'beijing': 'Asia/Shanghai',
-    'seoul': 'Asia/Seoul',
-    # Australia
-    'sydney': 'Australia/Sydney',
     'melbourne': 'Australia/Melbourne',
-    # Add more cities as needed
+    # Middle East
+    'dubai': 'Asia/Dubai',
+    'tel aviv': 'Asia/Jerusalem',
+    'riyadh': 'Asia/Riyadh',
+    'istanbul': 'Europe/Istanbul',
+    'doha': 'Asia/Qatar',
+    # Africa
+    'cape town': 'Africa/Johannesburg',
+    'cairo': 'Africa/Cairo',
+    'lagos': 'Africa/Lagos',
+    'nairobi': 'Africa/Nairobi',
+    'casablanca': 'Africa/Casablanca'
+}
+
+# Organized cities by continent
+CITIES_BY_CONTINENT = {
+    'North America': ['New York', 'Los Angeles', 'Chicago', 'Toronto', 'Vancouver'],
+    'Europe': ['London', 'Paris', 'Berlin', 'Rome', 'Amsterdam'],
+    'Asia & Australia': ['Tokyo', 'Singapore', 'Hong Kong', 'Beijing', 'Melbourne'],
+    'Middle East': ['Dubai', 'Tel Aviv', 'Riyadh', 'Istanbul', 'Doha'],
+    'Africa': ['Cape Town', 'Cairo', 'Lagos', 'Nairobi', 'Casablanca']
 }
 
 class TimeZoneCoordinator:
     def __init__(self):
-        self.timezones: List[str] = []
-        self.city_names: List[str] = []
-        # Get the local timezone name
+        self.primary_city = None
+        self.comparison_cities = []
         self.local_timezone = datetime.datetime.now().astimezone().tzinfo
         self.local_timezone_name = time.tzname[0]
         
-    def add_city(self, city_name: str) -> bool:
+    def set_primary_city(self, city_name: str) -> bool:
         city_name = city_name.lower().strip()
-        if not city_name:
-            return False
-            
         if city_name in CITY_TO_TIMEZONE:
-            timezone = CITY_TO_TIMEZONE[city_name]
-            if len(self.timezones) < 3 and timezone not in self.timezones:
-                self.timezones.append(timezone)
-                self.city_names.append(city_name.title())
-                return True
+            self.primary_city = city_name
+            return True
         return False
+        
+    def add_comparison_city(self, city_name: str) -> bool:
+        city_name = city_name.lower().strip()
+        if city_name in CITY_TO_TIMEZONE and len(self.comparison_cities) < 4 and city_name != self.primary_city:
+            self.comparison_cities.append(city_name)
+            return True
+        return False
+        
+    def remove_comparison_city(self, city_name: str):
+        city_name = city_name.lower().strip()
+        if city_name in self.comparison_cities:
+            self.comparison_cities.remove(city_name)
             
-    def clear_timezones(self):
-        self.timezones.clear()
-        self.city_names.clear()
+    def clear_comparison_cities(self):
+        self.comparison_cities.clear()
             
     def get_times(self, base_time: datetime.datetime) -> Dict[str, datetime.datetime]:
         times = {}
-        for i, tz in enumerate(self.timezones):
-            try:
-                if tz in pytz.common_timezones:
-                    times[self.city_names[i]] = base_time.astimezone(pytz.timezone(tz))
-                else:
-                    times[self.city_names[i]] = base_time
-            except pytz.exceptions.UnknownTimeZoneError:
-                continue
+        if self.primary_city:
+            # First, set the timezone of the input time to the primary city's timezone
+            primary_tz = pytz.timezone(CITY_TO_TIMEZONE[self.primary_city])
+            primary_time = primary_tz.localize(base_time.replace(tzinfo=None))
+            times[self.primary_city.title()] = primary_time
+            
+            # Then convert to other cities' timezones
+            for city in self.comparison_cities:
+                city_tz = pytz.timezone(CITY_TO_TIMEZONE[city])
+                times[city.title()] = primary_time.astimezone(city_tz)
         return times
     
     def get_time_period(self, time: datetime.datetime) -> str:
@@ -80,103 +106,255 @@ class TimeZoneCoordinator:
         else:
             return "Night"
 
-def main():
-    st.title("Time Zone Coordinator")
+def create_timeline_visualization(times: Dict[str, datetime.datetime], selected_time: datetime.datetime, coordinator: TimeZoneCoordinator):
+    # Create a DataFrame for the visualization
+    data = []
+    for city, time in times.items():
+        period = coordinator.get_time_period(time)
+        data.append({
+            'City': city,
+            'Time': time.strftime('%H:%M'),
+            'Period': period,
+            'Hour': time.hour + time.minute/60
+        })
     
-    # Initialize session state for cities if not exists
-    if 'coordinator' not in st.session_state:
-        st.session_state.coordinator = TimeZoneCoordinator()
+    df = pd.DataFrame(data)
     
-    # City input section
-    st.header("Enter City Names")
-    col1, col2, col3 = st.columns(3)
+    # Create the figure
+    fig = go.Figure()
     
-    with col1:
-        city1 = st.text_input("City 1", key="city1")
-    with col2:
-        city2 = st.text_input("City 2", key="city2")
-    with col3:
-        city3 = st.text_input("City 3", key="city3")
-    
-    if st.button("Update Timezones"):
-        st.session_state.coordinator.clear_timezones()
-        invalid_cities = []
+    # Add timeline for each city
+    for i, (city, row) in enumerate(df.iterrows()):
+        # Add the timeline
+        fig.add_trace(go.Scatter(
+            x=[0, 24],
+            y=[i, i],
+            mode='lines',
+            line=dict(color='gray', width=2),
+            showlegend=False
+        ))
         
-        for city in [city1, city2, city3]:
-            if city and not st.session_state.coordinator.add_city(city):
-                invalid_cities.append(city)
-        
-        if invalid_cities:
-            st.warning(f"The following cities are not recognized: {', '.join(invalid_cities)}")
-    
-    # Display current times
-    st.header("Current Times")
-    current_time = datetime.datetime.now(st.session_state.coordinator.local_timezone)
-    times = st.session_state.coordinator.get_times(current_time)
-    
-    if times:
-        for city, time in times.items():
-            period = st.session_state.coordinator.get_time_period(time)
-            st.write(f"{city}: {time.strftime('%H:%M')} ({period})")
-    
-    # Time visualization
-    st.header("Time Visualization")
-    if times:
-        # Create a 24-hour timeline
-        hours = [current_time + datetime.timedelta(hours=i) for i in range(24)]
-        
-        # Create Plotly figure
-        fig = go.Figure()
-        
-        # Add traces for each city
-        for i, (city, time) in enumerate(times.items()):
-            # Get time periods for each hour
-            periods = []
-            for hour in hours:
-                try:
-                    timezone = CITY_TO_TIMEZONE[city.lower()]
-                    if timezone in pytz.common_timezones:
-                        hour_in_tz = hour.astimezone(pytz.timezone(timezone))
-                    else:
-                        hour_in_tz = hour
-                    period = st.session_state.coordinator.get_time_period(hour_in_tz)
-                    periods.append(period)
-                except Exception:
-                    periods.append("Unknown")
-            
-            # Add scatter plot for the city
+        # Add hour markers
+        for hour in range(0, 25, 3):
             fig.add_trace(go.Scatter(
-                x=hours,
-                y=[i] * 24,
-                mode='markers',
-                name=city,
-                marker=dict(
-                    color=[{
-                        "Morning": "yellow",
-                        "Afternoon": "orange",
-                        "Evening": "red",
-                        "Night": "blue"
-                    }[p] for p in periods],
-                    size=10
-                )
+                x=[hour],
+                y=[i],
+                mode='markers+text',
+                marker=dict(size=8, color='gray'),
+                text=[str(hour)],
+                textposition='top center',
+                showlegend=False
             ))
         
-        # Update layout
-        fig.update_layout(
-            title="24-Hour Time Period Visualization",
-            xaxis_title="Time",
-            yaxis_title="City",
-            yaxis=dict(
-                ticktext=list(times.keys()),
-                tickvals=list(range(len(times))),
-                tickmode="array"
+        # Add the current time marker
+        fig.add_trace(go.Scatter(
+            x=[row['Hour']],
+            y=[i],
+            mode='markers',
+            marker=dict(
+                size=15,
+                color='#8A2BE2',
+                symbol='diamond'
             ),
-            height=400
+            name=f"{city} - {row['Time']}",
+            showlegend=True
+        ))
+    
+    # Add the vertical line for selected time
+    if selected_time:
+        selected_hour = selected_time.hour + selected_time.minute/60
+        fig.add_shape(
+            type="line",
+            x0=selected_hour,
+            y0=-0.5,
+            x1=selected_hour,
+            y1=len(times)-0.5,
+            line=dict(color="#8A2BE2", width=2, dash="dash")
+        )
+    
+    # Update layout
+    fig.update_layout(
+        title="Time Zone Comparison",
+        xaxis_title="Hour of Day",
+        yaxis_title="City",
+        yaxis=dict(
+            ticktext=list(times.keys()),
+            tickvals=list(range(len(times))),
+            tickmode="array"
+        ),
+        height=400,
+        showlegend=True
+    )
+    
+    return fig
+
+def validate_time_input(time_str: str) -> bool:
+    """Validate time input in HH:MM format"""
+    pattern = r'^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$'
+    return bool(re.match(pattern, time_str))
+
+def main():
+    # Add Kuromi ASCII art and theme header
+    st.markdown("""
+    <div style='text-align: center; margin-bottom: 0.5rem;'>
+        <pre style='color: #8A2BE2; font-size: 1.2px; line-height: 0.12; margin: 0; padding: 0; height: 1.5em;'>
+   ⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉
+   ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⣴⡄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⣶⣦⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+   ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⢻⣿⣶⣤⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⣶⣿⡿⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+   ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⣿⣿⣿⣿⣿⣶⣄⠀⠀⠀⠀⠀⢠⣴⣿⣿⣿⣿⣿⡇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+   ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣿⣿⣿⣿⣿⣿⣶⣿⣿⣿⣿⣾⣿⣿⣿⣿⣿⣿⠇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+   ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⣿⣿⣿⣿⣿⣿⣿⡿⠟⠿⣿⣿⣿⣿⣿⣿⣿⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+   ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⢛⣿⣿⣿⣿⣿⣿⣼⠀⢰⣼⣿⣿⣿⣿⣿⣏⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+   ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⣿⣿⣿⠟⠻⠿⣾⡿⠿⠛⠻⣿⣿⣿⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+   ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⣿⣿⡏⢹⣶⡄⠀⠀⠀⠀⢴⣾⠛⣿⣿⡿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+   ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠻⣿⣇⠘⠛⠀⢀⣶⣦⠀⠘⠛⢀⣿⡿⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+   ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣈⣽⣷⣶⡖⠒⢿⠟⠲⣤⣶⣿⣉⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+   ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠻⠞⠉⢻⣍⣳⣴⠛⢦⣒⣋⣿⠉⠳⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+   ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⠈⠉⠀⠀⠀⠈⠁⣿⠀⢴⣶⣶⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+   ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣇⠀⠀⣠⠀⠀⠀⣿⣴⣿⠿⠏⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+   ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣯⣀⣀⣀⡿⣅⣀⣀⣸⠇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+   ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠉⠁⠀⠀⠉⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+        </pre>
+    </div>
+    <div style='background-color: #E6E6FA; padding: 0.5rem; border-radius: 10px; margin-bottom: 1rem;'>
+        <h2 style='color: #8A2BE2; margin: 0; padding: 0.25rem; text-align: center;'>Time Zone Coordinator</h2>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Initialize session state
+    if 'coordinator' not in st.session_state:
+        st.session_state.coordinator = TimeZoneCoordinator()
+    if 'selected_time' not in st.session_state:
+        st.session_state.selected_time = None
+    if 'primary_city' not in st.session_state:
+        st.session_state.primary_city = None
+    if 'comparison_cities' not in st.session_state:
+        st.session_state.comparison_cities = set()
+    
+    # Step 1: Primary city selection
+    st.markdown("""
+    <div style='background-color: #E6E6FA; padding: 0.5rem; border-radius: 10px; margin-bottom: 1rem;'>
+        <h3 style='color: #8A2BE2; margin: 0; padding: 0.25rem;'>1. Select Primary City</h3>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if st.session_state.primary_city:
+        st.markdown(f"<p style='color: #8A2BE2;'>Current primary city: <strong>{st.session_state.primary_city}</strong></p>", unsafe_allow_html=True)
+    
+    # Create a single row for continent headers
+    header_cols = st.columns(len(CITIES_BY_CONTINENT))
+    for i, (continent, _) in enumerate(CITIES_BY_CONTINENT.items()):
+        with header_cols[i]:
+            st.markdown(f"<h4 style='text-align: center; margin-bottom: 0.5rem; color: #8A2BE2;'>{continent}</h4>", unsafe_allow_html=True)
+    
+    # Create columns for city buttons
+    city_cols = st.columns(len(CITIES_BY_CONTINENT))
+    for i, (continent, cities) in enumerate(CITIES_BY_CONTINENT.items()):
+        with city_cols[i]:
+            for city in cities:
+                button_key = f"primary_{city.lower().replace(' ', '_')}"
+                if st.button(
+                    city,
+                    key=button_key,
+                    type="primary" if city == st.session_state.primary_city else "secondary",
+                    use_container_width=True
+                ):
+                    st.session_state.primary_city = city
+                    st.session_state.coordinator.set_primary_city(city)
+                    st.rerun()
+    
+    # Step 2: Comparison cities selection
+    st.markdown("""
+    <div style='background-color: #E6E6FA; padding: 0.5rem; border-radius: 10px; margin-bottom: 1rem;'>
+        <h3 style='color: #8A2BE2; margin: 0; padding: 0.25rem;'>2. Select Comparison Cities (up to 4)</h3>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown(f"<p style='color: #8A2BE2;'>Selected: {len(st.session_state.comparison_cities)}/4 cities</p>", unsafe_allow_html=True)
+    
+    # Create a single row for continent headers
+    header_cols = st.columns(len(CITIES_BY_CONTINENT))
+    for i, (continent, _) in enumerate(CITIES_BY_CONTINENT.items()):
+        with header_cols[i]:
+            st.markdown(f"<h4 style='text-align: center; margin-bottom: 0.5rem; color: #8A2BE2;'>{continent}</h4>", unsafe_allow_html=True)
+    
+    # Create columns for city buttons
+    city_cols = st.columns(len(CITIES_BY_CONTINENT))
+    for i, (continent, cities) in enumerate(CITIES_BY_CONTINENT.items()):
+        with city_cols[i]:
+            for city in cities:
+                if city != st.session_state.primary_city:
+                    button_key = f"compare_{city.lower().replace(' ', '_')}"
+                    is_selected = city in st.session_state.comparison_cities
+                    if st.button(
+                        city,
+                        key=button_key,
+                        type="primary" if is_selected else "secondary",
+                        use_container_width=True
+                    ):
+                        if is_selected:
+                            st.session_state.comparison_cities.remove(city)
+                        elif len(st.session_state.comparison_cities) < 4:
+                            st.session_state.comparison_cities.add(city)
+                        else:
+                            st.warning("You can only select up to 4 comparison cities")
+                        st.rerun()
+    
+    # Update comparison cities in coordinator
+    st.session_state.coordinator.clear_comparison_cities()
+    for city in st.session_state.comparison_cities:
+        st.session_state.coordinator.add_comparison_city(city)
+    
+    # Only show Step 3 if at least one comparison city is selected
+    if st.session_state.comparison_cities:
+        st.markdown("""
+        <div style='background-color: #E6E6FA; padding: 0.5rem; border-radius: 10px; margin-bottom: 1rem;'>
+            <h3 style='color: #8A2BE2; margin: 0; padding: 0.25rem;'>3. Select Time</h3>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        current_time = datetime.datetime.now(st.session_state.coordinator.local_timezone)
+        
+        # Time input
+        time_input = st.text_input(
+            "Enter time in 24hr format (e.g., 14:30)",
+            value=current_time.strftime("%H:%M")
         )
         
-        st.plotly_chart(fig, use_container_width=True)
+        if time_input:
+            if validate_time_input(time_input):
+                try:
+                    hour, minute = map(int, time_input.split(':'))
+                    selected_time = datetime.datetime.combine(
+                        current_time.date(),
+                        datetime.time(hour, minute)
+                    )
+                    st.session_state.selected_time = selected_time
+                except ValueError:
+                    st.error("Please enter a valid time in HH:MM format")
+            else:
+                st.error("Please enter time in HH:MM format (24-hour)")
+        
+        # Only show Step 4 if time is selected and valid
+        if st.session_state.selected_time:
+            st.markdown("""
+            <div style='background-color: #E6E6FA; padding: 0.5rem; border-radius: 10px; margin-bottom: 1rem;'>
+                <h3 style='color: #8A2BE2; margin: 0; padding: 0.25rem;'>4. Time Comparison</h3>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            times = st.session_state.coordinator.get_times(st.session_state.selected_time)
+            if times:
+                fig = create_timeline_visualization(times, st.session_state.selected_time, st.session_state.coordinator)
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Display time details
+                st.markdown("<h4 style='color: #8A2BE2;'>Time Details</h4>", unsafe_allow_html=True)
+                for city, time in times.items():
+                    period = st.session_state.coordinator.get_time_period(time)
+                    st.markdown(f"<p style='color: #8A2BE2;'><strong>{city}</strong>: {time.strftime('%H:%M')} ({period})</p>", unsafe_allow_html=True)
     else:
-        st.info("Please add at least one city to see the visualization")
+        st.info("Please select at least one comparison city to continue")
 
 if __name__ == "__main__":
     main()
